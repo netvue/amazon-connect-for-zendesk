@@ -5,10 +5,28 @@ import { zafClient, zafInit } from './zafClient.js';
 import appendTicketComments from './appendTicketComments.js';
 import { dialableNumber } from './phoneNumbers.js'
 import newTicket from './newTicket.js';
-import { resize, popTicket } from './core.js';
+import { resize, popTicket, determineAssignmentBehavior } from './core.js';
 import ui from './ui.js'
+import { buttons } from '../constants/callControls.js';
+import { displayCallControls } from './callControls.js';
 
 window.onload = (event) => {
+    // first, establish the window (tab) id
+    const windowIdKey = "vf.windowId"
+    let windowId = sessionStorage.getItem(windowIdKey);
+    if (!windowId) {
+        windowId = uuidv4();
+        console.log(logStamp('new window/tab opened'), windowId);
+    }
+    else {
+        sessionStorage.removeItem(windowIdKey);
+        console.log(logStamp('reloaded window/tab'), windowId);
+    }
+    session.windowId = windowId;
+    window.addEventListener("beforeunload", () => {
+        sessionStorage.setItem(windowIdKey, windowId)
+    });
+
     window.vfConnectTimeout = window.setTimeout(() => {
         // ui.swapImage('loadingImg', 'prohibited.png');
         ui.show('whitelisting');
@@ -35,6 +53,36 @@ window.onload = (event) => {
         }
     });
 
+    ui.onClick(buttons.SUSPEND, async () => {
+        console.log(logStamp('Suspending call'), windowId);
+        const connectAPI = new AWS.Connect({ apiVersion: '2017-08-08' });
+        const params = {
+            ContactId: session.contact.getContactId(),
+            InitialContactId: session.contact.getInitialContactId(),
+            InstanceId: session.zafInfo.settings.connectInstanceId,
+        };
+        await connectAPI.suspendContactRecording(params).promise().catch((err) => {
+            console.error(logStamp('error calling suspendContactRecording: '), err);
+        });
+        localStorage.setItem('vf.currentlyRecording', 'false');
+        displayCallControls({ isCurrentlyRecording: false });
+    })
+
+    ui.onClick(buttons.RESUME, async () => {
+        console.log(logStamp('Resuming call'), windowId);
+        const connectAPI = new AWS.Connect({ apiVersion: '2017-08-08' });
+        const params = {
+            ContactId: session.contact.getContactId(),
+            InitialContactId: session.contact.getInitialContactId(),
+            InstanceId: session.zafInfo.settings.connectInstanceId,
+        };
+        await connectAPI.resumeContactRecording(params).promise().catch((err) => {
+            console.error(logStamp('error calling resumeContactRecording: '), err);
+        });
+        localStorage.setItem('vf.currentlyRecording', 'true');
+        displayCallControls({ isCurrentlyRecording: true });
+    })
+
     try {
         zafInit();
         zafClient.metadata().then((metadata) => {
@@ -51,6 +99,10 @@ window.onload = (event) => {
                 zafClient.on('instance.registered', onInstanceRegistered);
                 zafClient.on("voice.dialout", onDialout);
                 zafClient.on('vf.tab_switched', onTabSwitched);
+                zafClient.on('app.deactivated', async () => {
+                    console.log(logStamp("unloading topbar"));
+                    sessionStorage.setItem(windowIdKey, windowId)
+                });
             });
 
         });
@@ -95,7 +147,7 @@ const onDialout = (dialOut) => {
 };
 
 const onInstanceRegistered = async (context) => {
-    console.log(logStamp('onInstanceRegistered'), context);
+    // console.log(logStamp('onInstanceRegistered'), context);
 
     const contact = session.contact;
     if (!contact.contactId)
@@ -107,7 +159,8 @@ const onInstanceRegistered = async (context) => {
             localStorage.setItem('vf.transcript-init', session.transcriptHtml);
         }
 
-        if (context.location === 'new_ticket_sidebar') {
+        const autoAssignTickets = determineAssignmentBehavior();
+        if (context.location === 'new_ticket_sidebar' && !autoAssignTickets) {
             const message = 'During a call please create new tickets via your softphone.';
             zafClient.invoke('notify', message, 'alert', { sticky: true });
             zafClient.invoke('popover', 'show');
@@ -118,7 +171,7 @@ const onInstanceRegistered = async (context) => {
 };
 
 const onTabSwitched = async (context) => {
-    console.log(logStamp('onTabSwitched'), context);
+    // console.log(logStamp('onTabSwitched'), context);
 
     // if new tab is a ticket then save the id for possible outbound dialing to unrecognised number
     session.currentTabTicket = context.tabType === 'ticket' ? context.itemId : null;

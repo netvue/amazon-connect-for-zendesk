@@ -74,6 +74,11 @@
       "default": ""
     },
     {
+      "name": "timeZone",
+      "type": "text",
+      "default": ""
+    },
+    {
       "name": "createTicketAfterMinutes",
       "type": "text",
       "default": ""
@@ -82,8 +87,13 @@
       "name": "zendeskTicket",
       "type": "text",
       "default": "zendesk_ticket"
+    },
+    {
+      "name": "medialess",
+      "type": "checkbox",
+      "default": false
     }
   ],
-  "version": "2.1.2",
+  "version": "2.2",
   "frameworkVersion": "2.0"
 }

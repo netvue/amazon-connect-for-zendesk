@@ -102,3 +102,9 @@ dist
 
 # TernJS port file
 .tern-port
+
+# Local dev artifacts
+src/srcdev.zip
+src/ziplist.txt
+sandbox.html
+Contact Lens Sample.json

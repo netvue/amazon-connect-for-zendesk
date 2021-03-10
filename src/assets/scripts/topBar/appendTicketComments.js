@@ -1,6 +1,5 @@
 import logStamp from '../util/log.js';
 import session from './session.js';
-import updateTicket from './updateTicket.js';
 import { dialableNumber } from './phoneNumbers.js';
 import { zafClient } from './zafClient.js';
 
@@ -37,20 +36,38 @@ const contactDetailsPlain = (dict, title, noUnderscores = true) => {
     return details + '\n';
 }
 
-const recordingUrl = (contactId) => {
-    let url = `${session.zafInfo.settings.connectInstanceUrl}`;
+const getConnectUrl = () => {
+    let url = session.zafInfo.settings.connectInstanceUrl;
     if (!url.endsWith('/'))
         url += '/';
-    url += `connect/get-recording?format=wav&callLegId=${contactId}&zendesk_format=.wav`;
+    if (url.endsWith('.awsapps.com/'))
+        url += 'connect/';
     return url;
 }
 
+const recordingUrl = (contactId) => 
+    `${getConnectUrl()}get-recording?format=wav&callLegId=${contactId}&zendesk_format=.wav`;
+
 const traceUrl = (contactId) => {
-    let url = `${session.zafInfo.settings.connectInstanceUrl}`;
-    if (!url.endsWith('/'))
-        url += '/';
-    url += `connect/contact-trace-records/details/${contactId}`;
+    let url = `${getConnectUrl()}contact-trace-records/details/${contactId}`;
+    let timeZone = session.zafInfo.settings.timeZone;
+    if (timeZone)
+        url += `?tz=${timeZone}`;
     return url;
+}
+
+const updateTicket =  async (ticketId, changes) => {
+    const data = await zafClient.request({
+        url: `/api/v2/tickets/${ticketId}.json`,
+        type: 'PUT',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            ticket: changes
+        })
+    }).catch((err) => { console.error(logStamp('Error while updating ticket'), err) });
+
+    if (data && data.ticket)
+        console.log(logStamp(`Updated ticket ${data.ticket.id} with: `), changes);
 }
 
 const updateTicketWithContactDetails = async (contact, ticketId) => {
@@ -60,17 +77,18 @@ const updateTicketWithContactDetails = async (contact, ticketId) => {
     let direction;
     let htmlBody = '', plainBody = '';
 
+    outboundCli = appSettings.outboundCli;
+    inboundDialedNumber = appSettings.inboundDialedNumber || outboundCli;
+
     if (!session.contactDetailsAppended) {
 
-        outboundCli = appSettings.outboundCli;
-        inboundDialedNumber = appSettings.inboundDialedNumber || outboundCli;
         const agent = session.agent;
 
         const contactCallInfo = {
             Direction: session.outbound ? 'outbound' : 'inbound',
             Contact_Id: contact.contactId,
             Recording_file: `${link(recordingUrl(contact.contactId), 'download')} (available within a few minutes after the call)`,
-            Contact_Trace_Record_URL: `${link(traceUrl(contact.contactId), 'download')} (available within a few minutes after the call)`,
+            Contact_Trace_Record_URL: `${link(traceUrl(contact.contactId), 'view')} (available within a few minutes after the call)`,
             Queue_Name: contact.getQueue().name,
             Agent_Name: agent.getName(),
             Agent_Routing_Profile: agent.getRoutingProfile().name,
@@ -106,6 +124,7 @@ const updateTicketWithContactDetails = async (contact, ticketId) => {
     if (Object.keys(contactAttributesInfo).length) {
         htmlBody += (htmlBody ? '<br>' : '') + contactDetailsHtml(contactAttributesInfo, 'Amazon Connect Contact Attributes', false);
         plainBody += (plainBody ? '\r\n' : '') + contactDetailsPlain(contactAttributesInfo, 'Amazon Connect Contact Attributes', false);
+        localStorage.setItem('vf.storedAttributes', JSON.stringify(contactAttributesInfo));
     }
 
     if (htmlBody) {
@@ -134,11 +153,12 @@ export default {
             // open mini app
             zafClient.invoke('appsTray.show');
         }
+        localStorage.setItem('vf.assignedTicketId', ticketId);
 
         // do we need to update the user with the CLI?
         const cliNumber = session.phoneNo;
         const user = session.user;
-        if (user.id && cliNumber && !isNaN(cliNumber) && cliNumber !== dialableNumber(user.phone)) {
+        if (user && user.id && cliNumber && !isNaN(cliNumber) && cliNumber !== dialableNumber(user.phone)) {
             console.log(logStamp(`Number ${cliNumber} will be added to user ${user.name}`));
             await zafClient.request({
                 url: `/api/v2/users/${user.id}.json`,
@@ -188,7 +208,6 @@ export default {
             });
         }
 
-        zafClient.invoke('appsTray.hide');
         zafClient.invoke('routeTo', 'ticket', ticketId);
     }
 }

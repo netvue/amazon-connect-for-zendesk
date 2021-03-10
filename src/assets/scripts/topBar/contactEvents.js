@@ -5,9 +5,11 @@ import appConfig from './appConfig.js';
 import appendTicketComments from './appendTicketComments.js';
 import newTicket from './newTicket.js';
 import ui from './ui.js';
-import { resize, determineAssignmentBehavior, popTicket } from './core.js';
+import { resize, determineAssignmentBehavior, popTicket, getFromZD } from './core.js';
 import { processOutboundCall } from './outbound.js';
 import { processInboundCall } from './inbound.js';
+import setAWSCredentials from '../util/credentials.js';
+import { displayCallControls } from './callControls.js';
 
 let appSettings = {};
 let speechAnalysis;
@@ -22,9 +24,8 @@ const handleContactConnecting = async () => {
     console.log(logStamp('Contact connecting: '), session.contact);
     if (session.isMonitoring) return;
 
-    ui.show('newTicketContainer');
     session.ticketId = null;
-    
+
     if (session.contact.inboundConnection) {
         await appConfig.applyAttributes(session);
         appSettings = session.zafInfo.settings;
@@ -38,10 +39,44 @@ const handleContactConnecting = async () => {
 const handleContactConnected = async () => {
     if (session.isMonitoring) return;
 
-    if (session.contact.outboundConnection)
+    if (session.contact.outboundConnection || session.callInProgress)
         await appConfig.applyAttributes(session);
     appSettings = session.zafInfo.settings;
-    session.callStarted = new Date();
+    
+    // enabling pause/resume recording
+    if (appSettings.pauseRecording) {
+        const errorMessage = await setAWSCredentials(session.contact, appSettings);
+        if (!errorMessage) {
+            const isCurrentlyRecording = session.callInProgress 
+                ? localStorage.getItem('vf.currentlyRecording') === 'true'
+                : appSettings.pauseRecording;
+            displayCallControls({ isCurrentlyRecording });
+            console.log(logStamp('pause/resume recording is enabled'));
+        } else {
+            const message = `${errorMessage}. Pause and resume recording feature will be disabled for this call`;
+            zafClient.invoke('notify', message, 'error', { sticky: true });
+        }
+    }
+
+    if (session.callInProgress) {
+        const assignedTicketId = localStorage.getItem('vf.assignedTicketId');
+        const userId = localStorage.getItem('vf.viewingUserId');
+        console.log(logStamp("Call in progress: "), {
+            assignedTicket: assignedTicketId,
+            user: userId
+        });
+        const message = 'Call in progress. Resuming...';
+        zafClient.invoke('notify', message, 'notice');
+        if (userId) session.user = await getFromZD(`users/${userId}.json`, 'user');
+        if (assignedTicketId) {
+            session.ticketId = assignedTicketId;
+            session.ticketAssigned = true;
+            session.contactDetailsAppended = true;
+        } else
+            zafClient.invoke('popover', 'show');
+        const storedAttributes = localStorage.getItem('vf.storedAttributes');
+        if (storedAttributes) session.appendedAttributes = JSON.parse(storedAttributes);
+    }
 
     console.log(logStamp('handleContactConnected, pop before connected: '), appSettings.popBeforeCallConnected);
 
@@ -85,12 +120,21 @@ const handleContactConnected = async () => {
                     session.ticketId = await newTicket.createTicket().catch((err) => null); //TODO: handle these errors
                 if (session.ticketId) {
                     // assign this ticket to call and attach contact details automatically
-                    await appendTicketComments.appendContactDetails(session.contact, session.ticketId);
+                    if (!session.callInProgress)
+                        await appendTicketComments.appendContactDetails(session.contact, session.ticketId);
                     await popTicket(session.zenAgentId, session.ticketId);
                     zafClient.invoke('popover', 'hide');
                 }
-            } else
+            } else {
+                if (!session.ticketId) {
+                    const userId = localStorage.getItem('vf.viewingUserId');
+                    const ticketId = localStorage.getItem('vf.viewingTicketId');
+                    if (ticketId || userId)
+                        await newTicket.refreshUser(ticketId ? 'ticket' : 'user', ticketId || userId)
+                }
                 resize('full');
+            }
+
         }
     }
 }
@@ -109,10 +153,11 @@ const handleContactEnded = async () => {
     if (appSettings.speechAnalysisEnabled) {
         console.log(logStamp('handleContactEnded'), 'attempting to close webSocket session');
         await speechAnalysis.sessionClose();
-        localStorage.clear();
     }
 
-    console.log(logStamp('handleContactEnded'), session.contact.outboundConnection
+    const outbound = session.contact.outboundConnection;
+    const unassignedOutboundCall = outbound && !session.user;
+    console.log(logStamp('handleContactEnded'), outbound
         ? 'outbound'
         : (session.contact.inboundConnection
             ? 'inbound'
@@ -123,7 +168,7 @@ const handleContactEnded = async () => {
         await appendTicketComments.appendTheRest(session.contact, session.ticketId);
         if (appSettings.speechAnalysisEnabled)
             speechAnalysis.updateTicketAttribute(session.ticketId.toString());
-    } else if (appSettings.forceTicketCreation && !(session.isMonitoring)) {
+    } else if (appSettings.forceTicketCreation && !session.isMonitoring && !unassignedOutboundCall) {
         // manual assignment mode, the agent has forgotten to assign - force ticket creation (if configured)
         // set the agent as a requester
         session.user = { name: session.contact.customerNo, id: null }
@@ -136,7 +181,7 @@ const handleContactEnded = async () => {
         }
     }
 
-    resize('down');
+    resize('contactEnded');
     newTicket.setRequesterName(null);
     ui.enable('attachToCurrentBtn', false);
     zafClient.invoke('popover', 'show');
@@ -145,7 +190,8 @@ const handleContactEnded = async () => {
 }
 
 const handleIncomingCallback = async () => {
-    // not implemented, left for future enhancements
+    // console.log(logStamp(`handleIncomingCallback`));
+    zafClient.invoke('popover', 'show');
 }
 
 const logContactState = (contact, handlerName, description) => {
@@ -156,6 +202,26 @@ const logContactState = (contact, handlerName, description) => {
 }
 
 export default (contact) => {
+
+    console.log(logStamp('Checking contact processing eligibility'), {
+        visibility: document.visibilityState,
+        processingWindow: localStorage.getItem('vf.contactProcessingWindow'),
+        windowId: session.windowId
+    });
+    // don't do anything with this contact if this tab/window is in the background
+    if (document.visibilityState !== 'visible') return;
+    let contactProcessingWindow = localStorage.getItem('vf.contactProcessingWindow');
+    if (!contactProcessingWindow) {
+        // this windows is claiming the contact processing eligibility for this call
+        console.log(logStamp('claiming eligibility for: '), session.windowId);
+        localStorage.setItem('vf.contactProcessingWindow', session.windowId);
+    } else if (contactProcessingWindow !== session.windowId) return;
+
+    if (session.agent.getStatus().name.toLowerCase() === 'busy') {
+        // call in progress
+        console.warn(logStamp('call in progress!'));
+        session.callInProgress = true;
+    }
 
     // console.log(logStamp('Subscribing to events for contact'), contact);
     // if (contact.getActiveInitialConnection() && contact.getActiveInitialConnection().getEndpoint()) {
@@ -186,7 +252,7 @@ export default (contact) => {
         console.log(logStamp('is it monitoring? '), session.isMonitoring);
         // is this call a transfer?
         const data = currentContact.snapshot.contactData;
-        session.isTransfer = data.initialContactId && data.initialContactId !== data.contactId;
+        session.isTransfer = data.type !== "queue_callback" && data.initialContactId && data.initialContactId !== data.contactId;
         currentContact.initialContactId = data.initialContactId;
         console.log(logStamp('is it a transfer? '), session.isTransfer);
 
@@ -220,6 +286,7 @@ export default (contact) => {
         logContactState(contact, 'handleContactConnected', 'Contact connected to agent');
         if (!session.state.connected) {
             session.state.connected = true;
+            session.callStarted = contact.toSnapshot().contactData.state.timestamp;
             handleContactConnected()
                 .then((result) => result)
                 .catch((err) => { console.error(logStamp('handleContactConnected'), err) });
