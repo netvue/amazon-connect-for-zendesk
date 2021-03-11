@@ -35,7 +35,7 @@ Metadata:
     Author: VoiceFoundry-APAC
     SpdxLicenseId: GPL-3.0-or-later
     LicenseUrl: s3://214558022353-connect-zendesk-ap-southeast-2/zendesk-add-ons/zendesk-search/e62637ea8a114355b985fd86c9ffbd6e
-    ReadmeUrl: s3://214558022353-connect-zendesk-ap-southeast-2/zendesk-add-ons/zendesk-search/547af121d33d8574931ece28cfa6549e
+    ReadmeUrl: s3://214558022353-connect-zendesk-ap-southeast-2/zendesk-add-ons/zendesk-search/1f90e09d342746bcf4d5183462dc81d4
     Labels:
     - Connnect
     - search
@@ -43,7 +43,7 @@ Metadata:
     - Support-ticket
     - Contact-flow
     HomePageUrl: https://github.com/voicefoundryap/amazon-connect-for-zendesk/tree/master/add-ons/zendesk-search
-    SemanticVersion: 1.0.0
+    SemanticVersion: 1.0.1
     SourceCodeUrl: https://github.com/voicefoundryap/amazon-connect-for-zendesk/tree/master/add-ons/zendesk-search
 Resources:
   functionZendeskSearch:
