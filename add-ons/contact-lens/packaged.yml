@@ -49,7 +49,7 @@ Metadata:
     Author: VoiceFoundry-APAC
     SpdxLicenseId: GPL-3.0-or-later
     LicenseUrl: s3://214558022353-connect-zendesk-ap-southeast-2/zendesk-add-ons/contact-lens/e62637ea8a114355b985fd86c9ffbd6e
-    ReadmeUrl: s3://214558022353-connect-zendesk-ap-southeast-2/zendesk-add-ons/contact-lens/4a0246023352bbc9fee5374be8643d61
+    ReadmeUrl: s3://214558022353-connect-zendesk-ap-southeast-2/zendesk-add-ons/contact-lens/c8fbd6d06b83a4dbae7bb792ec772357
     Labels:
     - Connnect
     - Contact-Lens
@@ -57,7 +57,7 @@ Metadata:
     - Sentiment
     - Transcript
     HomePageUrl: https://github.com/voicefoundryap/amazon-connect-for-zendesk/tree/master/add-ons/contact-lens
-    SemanticVersion: 1.0.0
+    SemanticVersion: 1.0.1
     SourceCodeUrl: https://github.com/voicefoundryap/amazon-connect-for-zendesk/tree/master/add-ons/contact-lens
 Resources:
   tableZendeskRetries:
