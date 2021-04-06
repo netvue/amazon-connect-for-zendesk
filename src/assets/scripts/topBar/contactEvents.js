@@ -42,12 +42,12 @@ const handleContactConnected = async () => {
     if (session.contact.outboundConnection || session.callInProgress)
         await appConfig.applyAttributes(session);
     appSettings = session.zafInfo.settings;
-    
+
     // enabling pause/resume recording
     if (appSettings.pauseRecording) {
         const errorMessage = await setAWSCredentials(session.contact, appSettings);
         if (!errorMessage) {
-            const isCurrentlyRecording = session.callInProgress 
+            const isCurrentlyRecording = session.callInProgress
                 ? localStorage.getItem('vf.currentlyRecording') === 'true'
                 : appSettings.pauseRecording;
             displayCallControls({ isCurrentlyRecording });
@@ -203,50 +203,43 @@ const logContactState = (contact, handlerName, description) => {
 
 export default (contact) => {
 
-    console.log(logStamp('Checking contact processing eligibility'), {
-        visibility: document.visibilityState,
-        processingWindow: localStorage.getItem('vf.contactProcessingWindow'),
-        windowId: session.windowId
-    });
-    // don't do anything with this contact if this tab/window is in the background
-    if (document.visibilityState !== 'visible') return;
     let contactProcessingWindow = localStorage.getItem('vf.contactProcessingWindow');
-    if (!contactProcessingWindow) {
-        // this windows is claiming the contact processing eligibility for this call
-        console.log(logStamp('claiming eligibility for: '), session.windowId);
+    if (contactProcessingWindow && contactProcessingWindow !== session.windowId) {
+        // some other window/tab beat us to it
+        console.log(logStamp("Contact will be processed in another window: "), contactProcessingWindow);
+        return;
+    } else if (!contactProcessingWindow) {
+        // this windows is claiming the contact processing for this call
         localStorage.setItem('vf.contactProcessingWindow', session.windowId);
-    } else if (contactProcessingWindow !== session.windowId) return;
-
-    if (session.agent.getStatus().name.toLowerCase() === 'busy') {
-        // call in progress
-        console.warn(logStamp('call in progress!'));
-        session.callInProgress = true;
+        console.log(logStamp('Claimed contact processing for: '), session.windowId);
     }
 
-    // console.log(logStamp('Subscribing to events for contact'), contact);
-    // if (contact.getActiveInitialConnection() && contact.getActiveInitialConnection().getEndpoint()) {
-    //     console.log(logStamp('subscribeToContactEvents'), `New contact is from ${contact.getActiveInitialConnection().getEndpoint().phoneNumber}`);
-    // }
-    // else {
-    //     console.log(logStamp('subscribeToContactEvents'), 'This is an existing contact for this agent');
-    // }
-    // console.log(logStamp('subscribeToContactEvents'), `Contact is from queue ${contact.getQueue().name}`);
-
-    session.contact = contact;
-
-    const currentContact = session.contact;
-    const activeConnection = contact.getActiveInitialConnection();
-    currentContact.contactId = activeConnection['contactId'];
-    const connectionId = activeConnection['connectionId'];
-    const connection = new connect.Connection(currentContact.contactId, connectionId);
-    currentContact.customerNo = connection.getEndpoint().phoneNumber;
-    currentContact.snapshot = contact.toSnapshot();
-
-    const currentConnections = currentContact.snapshot.contactData.connections;
-    currentContact.inboundConnection = currentConnections.find((connection) => connection.type === 'inbound');
-    currentContact.outboundConnection = currentConnections.find((connection) => connection.type === 'outbound');
-
     try {
+        const agentStatus = session.agent.getStatus().name;
+        console.log(logStamp('agent status: '), agentStatus);
+        if (agentStatus.toLowerCase() === 'busy') {
+            // call in progress
+            console.warn(logStamp('call in progress!'));
+            session.callInProgress = true;
+        }
+
+        session.contact = contact;
+        const currentContact = session.contact;
+
+        currentContact.snapshot = contact.toSnapshot();
+        const activeConnection = contact.getActiveInitialConnection();
+        // abort if reloaded into after call work
+        if (!activeConnection && agentStatus.toLowerCase() === "aftercallwork") return;
+        
+        currentContact.contactId = activeConnection['contactId'];
+        const connectionId = activeConnection['connectionId'];
+        const connection = new connect.Connection(currentContact.contactId, connectionId);
+        let endpoint = connection.getEndpoint();
+
+        const currentConnections = currentContact.snapshot.contactData.connections;
+        currentContact.inboundConnection = currentConnections.find((connection) => connection.type === 'inbound');
+        currentContact.outboundConnection = currentConnections.find((connection) => connection.type === 'outbound');
+
         // don't create tickets for supervisors monitoring calls
         session.isMonitoring = !(currentContact.outboundConnection || currentContact.inboundConnection);
         console.log(logStamp('is it monitoring? '), session.isMonitoring);
@@ -256,8 +249,20 @@ export default (contact) => {
         currentContact.initialContactId = data.initialContactId;
         console.log(logStamp('is it a transfer? '), session.isTransfer);
 
+        currentContact.customerNo = endpoint.phoneNumber;
+        if (!session.isTransfer && !currentContact.customerNo) {
+            console.error(logStamp('No phoneNumber on endpoint:'), endpoint);
+            const message = 'No phone number detected, defaulting to anonymous.';
+            zafClient.invoke('notify', message, 'error', { sticky: true });
+            currentContact.customerNo = 'anonymous';
+        }
+
     } catch (err) {
         console.error(logStamp("Error on new contact: "), err);
+        session.clear();
+        const message = 'Unexpected technical error with the new contact. Aborting.';
+        zafClient.invoke('notify', message, 'error', { sticky: true });
+        return;
     }
 
     session.state = { connecting: false, callback: false, connected: false, callEnded: false };
@@ -283,6 +288,9 @@ export default (contact) => {
     });
 
     contact.onConnected((contact) => {
+        contactProcessingWindow = localStorage.getItem('vf.contactProcessingWindow');
+        if (contactProcessingWindow !== session.windowId) return;
+
         logContactState(contact, 'handleContactConnected', 'Contact connected to agent');
         if (!session.state.connected) {
             session.state.connected = true;
@@ -294,6 +302,9 @@ export default (contact) => {
     });
 
     contact.onEnded((contact) => {
+        contactProcessingWindow = localStorage.getItem('vf.contactProcessingWindow');
+        if (contactProcessingWindow !== session.windowId) return;
+
         logContactState(contact, 'handleContactEnded', 'Contact has ended successfully');
         handleContactEnded()
             .then((result) => result)
