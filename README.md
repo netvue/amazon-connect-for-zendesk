@@ -32,9 +32,10 @@ The search is performed within a contact flow by calling a lambda function which
 
 View the installation and user guide for Zendesk Search for Connect [here](add-ons/zendesk-search/Zendesk%20Search%20for%20Connect%20with%20the%20help%20of%20the%20Zendesk%20Support%20API-v2.2.pdf).
 ## Open source
-Since the app is open source you're free to make a fork of the repo, make modifications to it, and then do one of two things:
-- make a private app and install it in your Zendesk account, or
-- raise a pull request to contribute your changes to the official version
+Since the app is open source you're free to make a fork of the repo, make modifications to it, and make a private app and install it in your Zendesk account.
+
+At this stage, we do not support Pull Requests to merge into our GA release.
+
 ## Making and installing your private Zendesk app
 After forking the repo into your GitHub account and making your desired changes to it, use your favorite zip archiver app to create a zip package containing the contents of the `/src` folder :
 ```
