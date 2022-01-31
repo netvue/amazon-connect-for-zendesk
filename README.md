@@ -1,5 +1,8 @@
 # Amazon-Connect-for-Zendesk
 An integrated solution for Zendesk and Amazon Connect that combines advanced contact center capabilities with a sophisticated ticketing system, empowering teams with powerful tools for routing, tracking, prioritizing and solving customer service interactions.
+
+Please note: Product Enhancements are controlled by Zendesk for this application and need to be accepted there first. No agreement to develop is made without Zendesk Approval.
+
 ## How to install and use
 The Amazon Connect app for Zendesk Support is available on the [Zendesk marketplace↗](https://www.zendesk.com/apps/support/amazon-connect/). This is the official version which is regularly updated and released to the marketplace by VoiceFoundry via Zendesk. It contains the code and related assets within the Master branch of this repository. To learn how to install and use it in your Zendesk account please download our [Installation and User guide](docs/Amazon%20Connect%20App%20for%20Zendesk%20v2.2%20-%20Installation%20and%20User%20Guide.pdf).
 
