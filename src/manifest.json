@@ -1,12 +1,12 @@
 {
-  "name": "Amazon Connect",
+  "name": "Amazon Connect for Netvue V1",
   "author": {
-    "name": "VoiceFoundry APAC",
-    "email": "zendeskconnect@voicefoundry.com.au",
-    "url": "https://www.voicefoundry.com.au"
+    "name": "Netvue Team",
+    "email": "hi@netvue.com",
+    "url": "https://www.netvue.com"
   },
   "defaultLocale": "en",
-  "private": false,
+  "private": true,
   "location": {
     "support": {
       "user_sidebar": {
@@ -63,6 +63,11 @@
       "default": ""
     },
     {
+      "name": "region",
+      "type": "text",
+      "default": ""
+    },
+    {
       "name": "outboundCli",
       "type": "text",
       "required": true,
@@ -94,6 +99,6 @@
       "default": false
     }
   ],
-  "version": "2.2.2",
+  "version": "2.3.1 NV",
   "frameworkVersion": "2.0"
 }

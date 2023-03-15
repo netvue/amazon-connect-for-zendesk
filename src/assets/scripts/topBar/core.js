@@ -3,34 +3,35 @@ import logStamp from '../util/log.js';
 import session from './session.js';
 import { zafClient } from './zafClient.js';
 import { containerId as callControlsContainerId, resizeId as callControlsResizeId } from '../constants/callControls.js';
+import { dialableNumber } from './phoneNumbers.js'
 
 export const resize = (size) => {
     let height = 510;
     const expand = size === 'full' && !session.ticketAssigned;
 
-    if(size !== callControlsResizeId) {
+    if (size !== callControlsResizeId) {
         if (expand) {
             ui.show('newTicketContainer');
-            height+=80;
+            height += 80;
         } else {
             ui.hide('newTicketContainer');
         }
         const callControlsElement = document.getElementById(callControlsContainerId);
-        if(callControlsElement && callControlsElement.style.display === 'flex'){
-            height+=70;
-        }       
-    }
-    
-    if(size === callControlsResizeId) {
-        const newTicketContainer = document.getElementById('newTicketContainer');
-        if(newTicketContainer && newTicketContainer.style.display === 'block'){
-            height+=80;
+        if (callControlsElement && callControlsElement.style.display === 'flex') {
+            height += 70;
         }
-        ui.show(callControlsContainerId, 'flex')
-        height+=70;
     }
 
-    if(size === 'contactEnded') {
+    if (size === callControlsResizeId) {
+        const newTicketContainer = document.getElementById('newTicketContainer');
+        if (newTicketContainer && newTicketContainer.style.display === 'block') {
+            height += 80;
+        }
+        ui.show(callControlsContainerId, 'flex')
+        height += 70;
+    }
+
+    if (size === 'contactEnded') {
         ui.hide('newTicketcontainer')
         ui.hide(callControlsContainerId)
         height = 510;
@@ -90,18 +91,21 @@ export const findTicket = async (query) => {
     }
 }
 
-const findUser = async (query, requester = null) => {
-    console.log(logStamp('Searching for user: '), query, requester);
-    if (!query.trim() || ['anonymous', 'private', 'unknown'].includes(query.toLowerCase().trim()))
-        return { id: null, name: 'anonymous' };
+const findUser = async (query, requester = null, searchBy = 'phone') => {
+    console.log(logStamp('Searching for user: '), { query, requester, searchBy });
+    if (!(query && query.trim()))
+        return null;
 
-    const prefix = session.zafInfo.settings.defaultCountryPrefix;
-    console.log(logStamp('prefix: '), prefix);
-    if (prefix && query.startsWith(prefix))
-        query = query.substring(prefix.length);
+    if (searchBy === 'phone') {
+        const prefix = session.zafInfo.settings.defaultCountryPrefix;
+        console.log(logStamp('prefix: '), prefix);
+        if (prefix && query.startsWith(prefix))
+            query = query.substring(prefix.length);
+    }
 
-    console.log(logStamp('Searching for user by query: '), query);
-    const users = await getFromZD(`search.json?query=role%3Aend-user%20phone%3A*${query}`, 'results', []);
+    console.log(logStamp('Searching for user by query: '), searchBy, query);
+    const zdSearchQuery = `${searchBy}%3A${searchBy === 'phone' ? '*' : ''}${encodeURIComponent(query)}`;
+    const users = await getFromZD(`search.json?query=type%3Auser%20${zdSearchQuery}`, 'results', []);
     if (users.length) {
         console.log(logStamp('Found matching user(s): '), users);
         if (requester) {
@@ -111,17 +115,38 @@ const findUser = async (query, requester = null) => {
                 return foundAsReqester;
             } else {
                 console.warn(logStamp(`No requester (${requester}) match!`));
-                const message = `No user with this phone number matches the requested ticket`;
+                const message = `No user with this ${searchBy}: ${query} matches the requested ticket`;
                 zafClient.invoke('notify', message, 'alert', { sticky: true })
                 return null;
             }
         }
-        const user = users.find((user) => !user.shared_phone_number);
-        if (user)
-            console.log(logStamp('Found existing user'), user.name);
+        let user;
+        if (searchBy === 'phone') {
+            user = await Promise.any(users.map((user) => (async (user, query) => {
+                const userIdentities = await getFromZD(`users/${user.id}/identities`, 'identities', []);
+                if (userIdentities.some((identity) => identity.type === 'phone_number' && dialableNumber(identity.value).endsWith(query))) {
+                    console.log(logStamp(`Matched query ${query} with user `), user);
+                    return user;
+                } else return Promise.reject();
+            })(user, query))).catch(() => null);
+            if (!user) {
+                console.log(logStamp('None of the returned user identities matched the query '), query);
+                return null;
+            }
+            session.userPhone = query;
+        } else {
+            if (users.length > 1) {
+                session.zafInfo.settings.createAssignTickets = 'agent';
+                console.warn(logStamp(`multiple matches found for ${searchBy} ${query}. Turning on agent (manual) assignment mode!`));
+                const message = `Multiple users with the ${searchBy} ${query} exist. Switching to manual assignment mode`;
+                zafClient.invoke('notify', message, 'alert', { sticky: true });
+                return null;
+            }
+            user = users[0];
+        }
         return user;
     }
-    console.log(logStamp(`User with query ${query} not found`), users);
+    console.log(logStamp(`User with ${searchBy} ${query} not found`), users);
     return null;
 }
 
@@ -146,6 +171,13 @@ export const findMostRecentTicket = async (userId) => {
     return {};
 }
 
+export const setSessionPhone = (contact) => {
+    const appSettings = session.zafInfo.settings;
+    const normalizedUserPhone = appSettings.userPhone?.replace(/[ \.\(\)-]/g, '');
+    session.phoneNo = dialableNumber(normalizedUserPhone) || contact.customerNo;
+    console.log(logStamp('setting session phoneNo to: '), session.phoneNo);
+}
+
 export const resolveUser = async (contact, requester = null, dialOut = null) => {
 
     // obtained from dial-out event?
@@ -158,11 +190,12 @@ export const resolveUser = async (contact, requester = null, dialOut = null) => 
     }
 
     const appSettings = session.zafInfo.settings;
-    // obtained from the contact flow attribute?
+    // id obtained from the contact flow attribute?
     const userId = appSettings.zendeskUser;
+    let user;
     if (userId) {
-        console.log(logStamp('Searching for user by id via attribute'), userId);
-        const user = await getFromZD(`users/${userId}.json`, 'user');
+        console.log(logStamp('Searching for user by id via zendesk_user attribute'), userId);
+        user = await getFromZD(`users/${userId}.json`, 'user');
         if (!user) {
             const message = `A user with the specified user id #${userId} was not found`;
             zafClient.invoke('notify', message, 'alert', { sticky: true });
@@ -176,21 +209,32 @@ export const resolveUser = async (contact, requester = null, dialOut = null) => 
         return user;
     }
 
-    console.log(logStamp('trying to find user by phone'));
-
-    return appSettings.userPhone
-        // use the phone number from the contact flow attribute if we have one
-        ? findUser(appSettings.userPhone.replace(/[ \.\(\)-]/g, ''), requester)
-        // otherwise use phone number from the contact information
-        : findUser(contact.customerNo, requester);
+    const normalizedUserPhone = appSettings.userPhone?.replace(/[ \.\(\)-]/g, '');
+    console.log(logStamp('trying to find the user by email, phone or name'));
+    switch (contact.mediaType) {
+        case "chat":
+            user = await findUser(appSettings.userEmail, requester, 'email');
+            if (user) return user;
+            user = await findUser(normalizedUserPhone, requester, 'phone');
+            if (user) return user;
+            return findUser(appSettings.userName, requester, 'name');
+        case "task":
+            break;
+        default: // softphone or deskphone - try just the phone number
+            const phoneNo = normalizedUserPhone || contact.customerNo;
+            if (!phoneNo || ['anonymous', 'private', 'unknown'].includes(phoneNo.toLowerCase().trim()))
+                return { id: null, name: 'anonymous' };
+            return findUser(phoneNo, requester, 'phone');
+    }
 }
 
 export const validateTicket = async (ticketId) => {
     console.log(logStamp('Searching for ticket by number: '), ticketId);
     const ticket = await getFromZD(`tickets/${ticketId}.json`, 'ticket');
-    return ticket 
-        ? { 
-            ticketId: ticket.id, 
-            requester: ticket.requester_id }
-        : {}    
+    return ticket
+        ? {
+            ticketId: ticket.id,
+            requester: ticket.requester_id
+        }
+        : {}
 }

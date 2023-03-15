@@ -26,6 +26,7 @@ export default {
         };
         this.isTransfer = false;
         this.isMonitoring = false;
+        this.popCompleted = false;
         this.outbound = false;
         this.appendedAttributes = {}
         this.ticketId = null;
@@ -35,6 +36,7 @@ export default {
         this.transcriptHtml = '';
         this.speechAnalysisHtml = '';
         this.dialOut = null;
+        this.currentTabTicket = null;
         this.ticketInstance = null;
         this.contactDetailsAppended = false;
         this.appConfig.forEach((setting) => this.zafInfo.settings[setting.name] = setting.value || setting.default);
@@ -44,12 +46,15 @@ export default {
     },
 
     clearStorage: function () {
-        // preserve just the focused window
-        const focusedTab = localStorage.getItem('vf.tabInFocus');
-        localStorage.clear();
-        if (focusedTab) {
-            // needs an out of thread execution for some reason
-            window.setTimeout(() => { localStorage.setItem('vf.tabInFocus', focusedTab) }, 0);
-        }
+        // preserve just the focused window ('vf.tabInfocus')
+        const vfStorage = [
+            'vf.storedAttributes', 
+            'vf.processingTab', 
+            'vf.currentlyRecording', 
+            'vf.viewingUserId', 
+            'vf.viewingTicketId',
+            'vf.assignedTicketId', 
+        ];
+        vfStorage.forEach((key) => localStorage.removeItem(key));
     }
 }

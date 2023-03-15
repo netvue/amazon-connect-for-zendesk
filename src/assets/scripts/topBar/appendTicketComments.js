@@ -2,6 +2,7 @@ import logStamp from '../util/log.js';
 import session from './session.js';
 import { dialableNumber } from './phoneNumbers.js';
 import { zafClient } from './zafClient.js';
+import headerString from './commentHeader.js';
 
 let appSettings = {}
 let contactAttributes = {};
@@ -45,7 +46,7 @@ const getConnectUrl = () => {
     return url;
 }
 
-const recordingUrl = (contactId) => 
+const recordingUrl = (contactId) =>
     `${getConnectUrl()}get-recording?format=wav&callLegId=${contactId}&zendesk_format=.wav`;
 
 const traceUrl = (contactId) => {
@@ -56,7 +57,7 @@ const traceUrl = (contactId) => {
     return url;
 }
 
-const updateTicket =  async (ticketId, changes) => {
+const updateTicket = async (ticketId, changes) => {
     const data = await zafClient.request({
         url: `/api/v2/tickets/${ticketId}.json`,
         type: 'PUT',
@@ -86,21 +87,24 @@ const updateTicketWithContactDetails = async (contact, ticketId) => {
         const contactCallInfo = {
             Direction: session.outbound ? 'outbound' : 'inbound',
             Contact_Id: contact.contactId,
-            Recording_file: `${link(recordingUrl(contact.contactId), 'download')} (available within a few minutes after the call)`,
-            Contact_Trace_Record_URL: `${link(traceUrl(contact.contactId), 'view')} (available within a few minutes after the call)`,
             Queue_Name: contact.getQueue().name,
             Agent_Name: agent.getName(),
             Agent_Routing_Profile: agent.getRoutingProfile().name,
-            Agent_Extension: agent.isSoftphoneEnabled() ? 'Softphone' : agent.getExtension()
+            Contact_Trace_Record_URL: `${link(traceUrl(contact.contactId), 'view')} (available within a few minutes after the contact)`,
         };
 
-        if (!session.zafInfo.settings.enableVoiceComment) {
-            contactCallInfo.Call_from = session.outbound ? outboundCli : contact.customerNo;
-            contactCallInfo.Call_to = session.outbound ? contact.customerNo.split('@')[0].replace('sip:', '') : inboundDialedNumber;
-        }
+        if (contact.mediaType !== "chat") {
+            contactCallInfo.Agent_Extension = agent.isSoftphoneEnabled() ? 'Softphone' : agent.getExtension();
 
-        if (!session.zafInfo.settings.enableRecordingDownload)
-            delete contactCallInfo.Recording_file;
+            if (session.zafInfo.settings.enableRecordingDownload) {
+                contactCallInfo.Recording_file = `${link(recordingUrl(contact.contactId), 'download')} (available within a few minutes after the call)`;
+            }
+
+            if (!session.zafInfo.settings.enableVoiceComment) {
+                contactCallInfo.Call_from = session.outbound ? outboundCli : contact.customerNo;
+                contactCallInfo.Call_to = session.outbound ? contact.customerNo.split('@')[0].replace('sip:', '') : inboundDialedNumber;
+            }
+        }
 
         htmlBody = contactDetailsHtml(contactCallInfo, 'Amazon Connect Contact Details');
         plainBody = contactDetailsPlain(contactCallInfo, 'Amazon Connect Contact Details');
@@ -140,7 +144,7 @@ const updateTicketWithContactDetails = async (contact, ticketId) => {
 
 export default {
 
-    appendContactDetails: async (contact, ticketId, showApps=true) => {
+    appendContactDetails: async (contact, ticketId, showApps = true) => {
 
         contactAttributes = contact.getAttributes();
         appSettings = session.zafInfo.settings;
@@ -167,7 +171,7 @@ export default {
                     user: { phone: cliNumber }
                 })
             }).catch((err) => { console.error(logStamp('Error while updating user phone '), err) });
-        }    
+        }
     },
 
     appendTheRest: async (contact, ticketId) => {
@@ -191,7 +195,7 @@ export default {
 
         await updateTicketWithContactDetails(contact, ticketId);
 
-        if (appSettings.enableVoiceComment) {
+        if (appSettings.enableVoiceComment && contact.mediaType !== "chat") {
             // console.log(logStamp('Adding voice comment'));
             const callEndedAt = new Date();
 
@@ -203,6 +207,20 @@ export default {
                     started_at: session.callStarted.toISOString(),
                     call_duration: Math.round((callEndedAt - session.callStarted) / 1000),
                     answered_by_id: session.zenAgentId,
+                }
+            });
+        }
+
+        if (contact.mediaType === "chat" && appSettings.chatTranscript) {
+            const transcript = `<div class="comment-box">
+                <div class="comment-section-title" style="margin-top: -20px;">Chat Transcript</div>
+                ${session.chatTranscript.join("")}
+            </div>`;
+
+            await updateTicket(ticketId, {
+                comment: {
+                    html_body: headerString() + transcript,
+                    public: false,
                 }
             });
         }

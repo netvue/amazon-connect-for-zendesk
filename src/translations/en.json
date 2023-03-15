@@ -21,6 +21,10 @@
         "label": "Default entry point phone number",
         "helpText": "The call centre number that will be reported in tickets as the number that the call was dialed from in outbound calls and the number that was called in inbound calls. For inbound calls it can be overridden by setting the `dialed_number` attribute in your contact flow."
       },
+      "region": {
+        "label": "AWS Region",
+        "helpText": "The name of the Connect instance's region, eg. us-east-1. Required for chat conversations."
+      },
       "defaultCountryPrefix": {
         "label": "Default country dialing prefix (optional)",
         "helpText": "If specified, this prefix will be used in matching Zendesk users' telephone numbers that are in local format (without the prefix). Example: +61 for Australia."

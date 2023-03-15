@@ -5,14 +5,15 @@ import appendTicketComments from './appendTicketComments.js';
 import newTicket from './newTicket.js';
 import {
     resize, determineAssignmentBehavior, popUser, popTicket, getFromZD,
-    findTicket, findMostRecentTicket, resolveUser, validateTicket
+    findTicket, findMostRecentTicket, resolveUser, validateTicket, setSessionPhone
 } from './core.js';
 
 export const processInboundCall = async (contact) => {
     console.log(logStamp('Processing inbound call on contact'), contact);
     console.log(logStamp("Attributes map: "), contact.getAttributes());
 
-    session.phoneNo = contact.customerNo;
+    setSessionPhone(contact);
+
     let ticketId, user, userId;
     let autoAssignTickets = determineAssignmentBehavior();
     const appSettings = session.zafInfo.settings;
@@ -77,8 +78,9 @@ export const processInboundCall = async (contact) => {
             newTicket.setRequesterName(user.name);
     } else if (autoAssignTickets) {
         if (session.state.connected) {
-            await newTicket.createUser();
-            user = session.user;
+            user = await newTicket.handleNewUser(contact);
+            if (contact.mediaType === "chat" && !user)
+                autoAssignTickets = false;
         }
         ticketId = null;
     }
@@ -104,11 +106,14 @@ export const processInboundCall = async (contact) => {
                 // assign this ticket to call and attach contact details automatically
                 if (!session.callInProgress)    // and app was not reloaded in the middle of a call
                     await appendTicketComments.appendContactDetails(session.contact, ticketId);
-                zafClient.invoke('popover', 'hide');
+                if (session.contact.mediaType !== "chat")
+                    zafClient.invoke('popover', 'hide');
             } else
                 resize('full');
-        } else
+        } else {
             session.ticketId = ticketId;
+            session.popCompleted = true;
+        }
         return;
     }
 
@@ -119,6 +124,8 @@ export const processInboundCall = async (contact) => {
         await newTicket.refreshUser('ticket', ticketId);
         if (session.state.connected)
             resize('full');
+        else
+            session.popCompleted = true;
         return;
     }
 
@@ -130,14 +137,17 @@ export const processInboundCall = async (contact) => {
                 if (ticketId) {
                     await appendTicketComments.appendContactDetails(session.contact, ticketId);
                     await popTicket(session.zenAgentId, ticketId);
-                    zafClient.invoke('popover', 'hide');
+                    if (session.contact.mediaType !== "chat")
+                        zafClient.invoke('popover', 'hide');
                 }
             } else {
                 await popUser(session.zenAgentId, userId);
                 resize('full');
             }
-        } else
+        } else {
             await popUser(session.zenAgentId, userId);
+            session.popCompleted = true;
+        }
         return;
     }
 
@@ -149,9 +159,11 @@ export const processInboundCall = async (contact) => {
             if (ticketId) {
                 await appendTicketComments.appendContactDetails(session.contact, ticketId);
                 await popTicket(session.zenAgentId, ticketId);
-                zafClient.invoke('popover', 'hide');
+                if (session.contact.mediaType !== "chat")
+                    zafClient.invoke('popover', 'hide');
             }
         } else
             resize('full');
-    }
+    } else
+        session.popCompleted = true;
 }

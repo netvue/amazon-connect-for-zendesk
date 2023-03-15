@@ -48,7 +48,8 @@ export const processOutboundCall = async (contact) => {
                 if (ticketId) {
                     await appendTicketComments.appendContactDetails(contact, ticketId);
                     await popTicket(session.zenAgentId, ticketId);
-                    zafClient.invoke('popover', 'hide');
+                    if (session.contact.mediaType !== "chat")
+                        zafClient.invoke('popover', 'hide');
                 }
             } else {
                 // pop the user and let agent decide further actions
@@ -73,5 +74,20 @@ export const processOutboundCall = async (contact) => {
             await appendTicketComments.appendContactDetails(contact, ticketId);
             zafClient.invoke('popover', 'hide');
         }
+    } else if (session.zafInfo.settings.createOnAllOutbound) {
+        // manual dial out to an unknown number - setting demands creating a new user and ticket
+        session.phoneNo = contact.customerNo;
+        console.log(logStamp('defaulting to new user at:'), session.phoneNo);
+        if (autoAssignTickets) {
+            // create new ticket and assign it to call and attach contact details automatically
+            const ticketId = await newTicket.createTicket().catch((err) => null); //TODO: handle this error
+            if (ticketId) {
+                await appendTicketComments.appendContactDetails(session.contact, ticketId);
+                await popTicket(session.zenAgentId, ticketId);
+                if (session.contact.mediaType !== "chat")
+                    zafClient.invoke('popover', 'hide');
+            }
+        } else
+            resize('full');
     }
 }

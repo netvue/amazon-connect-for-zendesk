@@ -32,7 +32,8 @@ export default (appSettings, ccpContainerId) => {
         loginPopup: true, // TODO: display login popup within the app iframe, not as a new tab
         softphone: {
             allowFramedSoftphone: !appSettings.medialess
-        }
+        },
+        region: appSettings.region,
     };
     if (appSettings.ssoSignInUrl)
     ccpParams.loginUrl = appSettings.ssoSignInUrl;

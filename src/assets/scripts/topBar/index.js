@@ -9,6 +9,7 @@ import { resize, popTicket, determineAssignmentBehavior } from './core.js';
 import ui from './ui.js'
 import { buttons } from '../constants/callControls.js';
 import { displayCallControls } from './callControls.js';
+import unavailableAgentStates from './unavailableAgentStates.js';
 
 window.onload = (event) => {
     // first, establish the window (tab) id
@@ -44,7 +45,8 @@ window.onload = (event) => {
             resize('down');
             await appendTicketComments.appendContactDetails(session.contact, ticketId);
             await popTicket(session.zenAgentId, ticketId);
-            zafClient.invoke('popover', 'hide');
+            if (session.contact.mediaType !== "chat")
+                zafClient.invoke('popover', 'hide');
         }
     });
 
@@ -54,7 +56,8 @@ window.onload = (event) => {
             // immediately update with call attributes, before popping to the agent
             resize('down');
             await appendTicketComments.appendContactDetails(session.contact, ticketId);
-            zafClient.invoke('popover', 'hide');
+            if (session.contact.mediaType !== "chat")
+                zafClient.invoke('popover', 'hide');
         }
     });
 
@@ -128,6 +131,16 @@ window.onload = (event) => {
 const onDialout = (dialOut) => {
     console.log(logStamp('dialing out'), dialOut);
 
+
+    const agentState = session.agent.getState();
+    console.log(logStamp("Agent's state"), agentState);
+    if (unavailableAgentStates.includes(agentState.name)) {
+        const message = "Please make sure you're in an available status first.";
+        zafClient.invoke('notify', message, 'error', { sticky: true });
+        zafClient.invoke('popover', 'show');
+        return;
+    }
+
     session.dialOut = dialOut;
     // number pad supported via softphone only
     if (!dialOut.number) {
@@ -176,17 +189,23 @@ const onInstanceRegistered = async (context) => {
 };
 
 const onTabSwitched = async (context) => {
-    // console.log(logStamp('onTabSwitched'), context);
+    console.log(logStamp('onTabSwitched'), context);
 
     // if new tab is a ticket then save the id for possible outbound dialing to unrecognised number
+    session.dialOut = null;
     session.currentTabTicket = context.tabType === 'ticket' ? context.itemId : null;
 
     const contact = session.contact;
     if (!contact.contactId)
         return;
 
-    if ((session.state.callback || session.state.connected) && !session.state.callEnded && !session.ticketAssigned) {
+    const autoAssignTickets = determineAssignmentBehavior();
+    // only refresh user/ticket in agent mode while connected and not yet assigned
+    if (!autoAssignTickets 
+        && (session.state.callback || session.state.connected)
+        && !session.state.callEnded
+        && !session.ticketAssigned
+    ) 
         newTicket.refreshUser(context.tabType, context.itemId);
-    }
 
 };

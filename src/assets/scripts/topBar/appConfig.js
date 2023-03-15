@@ -25,8 +25,16 @@ const hardcoded = [
         label: "Force ticket creation for every call",
         description: "When ticket assignment is set to \"agent\" this flag determines whether to force create a ticket in case agent hasn't created or assigned one during the call.",
         type: "checkbox",
-        default: true, 
+        default: true,
         attribute: "force_ticket_creation"
+    },
+    {
+        name: "createOnAllOutbound",
+        label: "Create a ticket for every outoubnd call",
+        description: "Normally, tickets will not be created for outbound calls to unknown numbers. If this attribute is set to true though, a new user will be automatically created along with a new ticket.",
+        type: "checkbox",
+        default: false,
+        attribute: "all_outbound"
     },
     {
         name: "popBeforeCallConnected",
@@ -79,6 +87,14 @@ const hardcoded = [
         attribute: "zendesk_user"
     },
     {
+        name: "userEmail",
+        label: "Contact attribute name containing the email address of the user",
+        description: "The Amazon Connect contact attribute that contains the user's email address. When supplied, email address will have priority in customer search over phone number and name.",
+        type: "attribute",
+        default: null,
+        attribute: "customer_email"
+    },
+    {
         name: "userPhone",
         label: "Contact attribute name containing the main phone number of the user",
         description: "The Amazon Connect contact attribute that contains the user's phone number which may be different from the number that the user dialed from. This number would then be used in search instead of the CLI.",
@@ -120,6 +136,14 @@ const hardcoded = [
         type: "checkbox",
         default: false,
         attribute: "pause_recording"
+    },
+    {
+        name: "chatTranscript",
+        label: "Add chat transcript to the ticket",
+        description: "When enabled (default) it will add the Connect chat transcript to the ticket as a private comment.",
+        type: "checkbox",
+        default: true,
+        attribute: "chat_transcript"
     }
 ];
 
@@ -187,28 +211,32 @@ const valueChecks = (setting, value, attrName) => {
 }
 
 const applyAttributes = async (session) => {
-    if (!session.appConfig.length) {
-        await init(session);
-        session.appConfig.forEach((setting) => session.zafInfo.settings[setting.name] = setting.value || setting.default)
-    }
+    try {
+        if (!session.appConfig.length) {
+            await init(session);
+            session.appConfig.forEach((setting) => session.zafInfo.settings[setting.name] = setting.value || setting.default)
+        }
 
-    const attributes = session.contact.getAttributes();
-    console.log(logStamp('Applying config attributes: '), attributes);
-    session.appConfig.forEach((setting) => {
-        if (setting.attribute.trim()) { // attribute name must be a non-empty string, ignore if empty
-            const attribute = attributes[setting.attribute];
-            if (attribute) {
-                const attrValue = attribute.value;
-                if (!(['', '-', 'none', 'empty', 'ignore', 'timeout'].includes(attrValue.toLowerCase().trim()) 
-                    || !valueChecks(setting, attrValue, attribute.name))) {
-                    let value = attrValue;
-                    if (setting.type === 'number') value = attrValue * 1;
-                    if (setting.type === 'checkbox') value = ['true', 't', '1', 'yes', 'y'].includes(attrValue);
-                    session.zafInfo.settings[setting.name] = value;
+        const attributes = session.contact.getAttributes();
+        console.log(logStamp('Applying config attributes: '), attributes);
+        session.appConfig.forEach((setting) => {
+            if (setting.attribute.trim()) { // attribute name must be a non-empty string, ignore if empty
+                const attribute = attributes[setting.attribute];
+                if (attribute) {
+                    const attrValue = attribute.value;
+                    if (!(['', '-', 'none', 'empty', 'ignore', 'timeout'].includes(attrValue.toLowerCase().trim())
+                        || !valueChecks(setting, attrValue, attribute.name))) {
+                        let value = attrValue;
+                        if (setting.type === 'number') value = attrValue * 1;
+                        if (setting.type === 'checkbox') value = ['true', 't', '1', 'yes', 'y'].includes(attrValue);
+                        session.zafInfo.settings[setting.name] = value;
+                    }
                 }
             }
-        }
-    });
+        });
+    } catch (err) {
+        console.error(logStamp('Error applying attributes: '), err);
+    }
 }
 
 export default { applyAttributes }

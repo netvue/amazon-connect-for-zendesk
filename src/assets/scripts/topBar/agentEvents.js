@@ -43,5 +43,4 @@ export default (agent) => {
     agent.onOffline((agent) => {
         // console.log(logStamp(`Agent is offline. Agent status is [${agent.getStatus().name}]`));
     });
-
 }

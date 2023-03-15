@@ -10,6 +10,9 @@ import { processOutboundCall } from './outbound.js';
 import { processInboundCall } from './inbound.js';
 import setAWSCredentials from '../util/credentials.js';
 import { displayCallControls } from './callControls.js';
+import getChatTranscript from './getChatTranscript.js';
+import { convertChatMessage } from './getChatTranscript.js';
+
 
 let appSettings = {};
 let speechAnalysis;
@@ -29,10 +32,11 @@ const setProcessingTab = () => {
     }
     if (focusedTab !== session.windowId) {
         console.log(logStamp("Contact will be processed in another, focused tab: "), focusedTab);
-        return;
+        return focusedTab;
     }
     localStorage.setItem('vf.processingTab', session.windowId);
     console.log(logStamp('Claimed contact processing in tab: '), session.windowId);
+    return session.windowId;
 }
 
 const handleContactConnecting = async () => {
@@ -47,6 +51,7 @@ const handleContactConnecting = async () => {
         appSettings = session.zafInfo.settings;
         console.log(logStamp('handleContactIncoming, pop before connected: '), appSettings.popBeforeCallConnected);
         if (appSettings.popBeforeCallConnected) {
+            session.popCompleted = false;
             await processInboundCall(session.contact);
         }
     }
@@ -126,12 +131,24 @@ const handleContactConnected = async () => {
 
         if (!appSettings.popBeforeCallConnected)
             await processInboundCall(session.contact);
-        else {
+        else if (session.popCompleted || session.callInProgress) {
+            const setupAgentMode = async (noChatUser = false) => {
+                if (!session.ticketId) {
+                    const userId = localStorage.getItem('vf.viewingUserId');
+                    const ticketId = localStorage.getItem('vf.viewingTicketId');
+                    if (ticketId || userId || noChatUser)
+                        await newTicket.refreshUser(ticketId ? 'ticket' : 'user', ticketId || userId)
+                }
+                resize('full');
+            }
+            
             const autoAssignTickets = determineAssignmentBehavior();
             if (autoAssignTickets) {
                 if (!session.user)
                     // create new user if necessary
-                    await newTicket.createUser();
+                    await newTicket.handleNewUser(session.contact);
+                    if (session.contact.mediaType === "chat" && !session.user) 
+                        return setupAgentMode(true);
                 if (!session.ticketId)
                     // create new ticket if necessary
                     session.ticketId = await newTicket.createTicket().catch((err) => null); //TODO: handle these errors
@@ -140,16 +157,11 @@ const handleContactConnected = async () => {
                     if (!session.callInProgress)
                         await appendTicketComments.appendContactDetails(session.contact, session.ticketId);
                     await popTicket(session.zenAgentId, session.ticketId);
-                    zafClient.invoke('popover', 'hide');
+                    if (session.contact.mediaType !== "chat")
+                        zafClient.invoke('popover', 'hide');
                 }
             } else {
-                if (!session.ticketId) {
-                    const userId = localStorage.getItem('vf.viewingUserId');
-                    const ticketId = localStorage.getItem('vf.viewingTicketId');
-                    if (ticketId || userId)
-                        await newTicket.refreshUser(ticketId ? 'ticket' : 'user', ticketId || userId)
-                }
-                resize('full');
+                setupAgentMode();
             }
 
         }
@@ -172,7 +184,7 @@ const handleContactEnded = async () => {
     }
 
     const outbound = session.contact.outboundConnection;
-    const unassignedOutboundCall = outbound && !session.user;
+    const unassignedOutboundCall = outbound && !session.user && !appSettings.createOnAllOutbound;
     console.log(logStamp('handleContactEnded'), outbound
         ? 'outbound'
         : (session.contact.inboundConnection
@@ -225,48 +237,84 @@ const logContactState = (contact, handlerName, description) => {
 export default (contact) => {
 
     try {
+
+        if (session.contact && session.contact.mediaType === 'chat') {
+            console.error(logStamp('agent is already handling another chat, aborting! '));
+            const message = `Multiple concurrent chats are not supported.
+            Please reject this chat and reconfigure your routing profile in Connect accordingly.`;
+            zafClient.invoke('notify', message, 'error', { sticky: true });
+            return;
+        }
+
         const agentStatus = session.agent.getStatus().name;
         // abort if loaded into after call work
         if (agentStatus.toLowerCase() === "aftercallwork") {
             console.warn(logStamp('agent is in After Call Work, aborting! '));
             return;
-        }
+        }    
 
         if (agentStatus.toLowerCase() === 'busy') {
             // call in progress
             console.warn(logStamp('call in progress!'));
             session.callInProgress = true;
-        }
+        }    
 
         session.contact = contact;
         const currentContact = session.contact;
+        currentContact.contactId = contact.getContactId();
 
         currentContact.snapshot = contact.toSnapshot();
-        const activeConnection = contact.getActiveInitialConnection();
-        currentContact.contactId = activeConnection['contactId'];
-        const connectionId = activeConnection['connectionId'];
-        const connection = new connect.Connection(currentContact.contactId, connectionId);
-        let endpoint = connection.getEndpoint();
-
-        const currentConnections = currentContact.snapshot.contactData.connections;
-        currentContact.inboundConnection = currentConnections.find((connection) => connection.type === 'inbound');
-        currentContact.outboundConnection = currentConnections.find((connection) => connection.type === 'outbound');
+        const contactData = currentContact.snapshot.contactData;
+        currentContact.inboundConnection = contactData.connections.find((connection) => connection.type === 'inbound');
+        currentContact.outboundConnection = contactData.connections.find((connection) => connection.type === 'outbound');
 
         // don't create tickets for supervisors monitoring calls
         session.isMonitoring = !(currentContact.outboundConnection || currentContact.inboundConnection);
         console.log(logStamp('is it monitoring? '), session.isMonitoring);
+
+        const connection = contact.getConnections()
+            .find((connection) => (
+                connection.connectionId === currentContact.inboundConnection?.connectionId ||
+                connection.connectionId === currentContact.outboundConnection?.connectionId
+            ));
+        currentContact.mediaType = connection?.getMediaType();
+
+        // check that the region has been configured for chats
+        appSettings = session.zafInfo.settings;
+        if (currentContact.mediaType === "chat" && !appSettings.region) {
+            console.error(logStamp(`region hasn't been configured, aborting! `));
+            const message = `AWS region needs to be configured for chat support.
+            Please ask your administrator to update your app configuration.`;
+            zafClient.invoke('notify', message, 'error', { sticky: true });
+            return;
+        }
+
         // is this call a transfer?
-        const data = currentContact.snapshot.contactData;
-        session.isTransfer = data.type !== "queue_callback" && data.initialContactId && data.initialContactId !== data.contactId;
-        currentContact.initialContactId = data.initialContactId;
+        session.isTransfer = 
+            contactData.type !== "queue_callback" &&
+            contactData.initialContactId &&
+            contactData.initialContactId !== contactData.contactId;
+        currentContact.initialContactId = contactData.initialContactId;
         console.log(logStamp('is it a transfer? '), session.isTransfer);
 
-        currentContact.customerNo = endpoint.phoneNumber;
-        if (!session.isTransfer && !currentContact.customerNo) {
+        const endpoint = currentContact.mediaType && currentContact.mediaType !== "chat" && connection?.getEndpoint();
+        currentContact.customerNo = endpoint?.phoneNumber;
+        if (!(session.isTransfer || currentContact.mediaType === "chat") && !currentContact.customerNo) {
             console.error(logStamp('No phoneNumber on endpoint:'), endpoint);
             const message = 'No phone number detected, defaulting to anonymous.';
             zafClient.invoke('notify', message, 'error', { sticky: true });
             currentContact.customerNo = 'anonymous';
+        }
+
+        if (currentContact.mediaType === "chat") {
+            console.log(logStamp('Incoming chat:'), contactData);
+            currentContact.getAgentConnection().getMediaController().then(async (controller) => {
+                session.chatTranscript = await getChatTranscript(controller);
+                controller.onMessage(({ data }) => {
+                    session.chatTranscript.push(convertChatMessage(data));
+                });
+            });
+
         }
 
     } catch (err) {
@@ -307,9 +355,12 @@ export default (contact) => {
     });
 
     contact.onConnected((contact) => {
-        const processingTab = localStorage.getItem('vf.processingTab');
+        let processingTab = localStorage.getItem('vf.processingTab');
+        // should have had the processing tab by now, unless agent is using a desk phone
+        if (!processingTab) {
+            processingTab = setProcessingTab();
+        }
         if (processingTab !== session.windowId) {
-            console.log(logStamp('onConnected is processed in the other tab: '), processingTab)
             return;
         }
 
@@ -338,7 +389,10 @@ export default (contact) => {
             session.state.callEnded = true;
             handleContactEnded()
                 .then((result) => result)
-                .catch((err) => { console.error(logStamp('handleContactEnded'), err) });
+                .catch((err) => {
+                    console.error(logStamp('handleContactEnded'), err);
+                    session.clear();
+                });
         }
     });
 

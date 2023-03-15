@@ -4,16 +4,37 @@ import logStamp from '../util/log.js';
 import { getFromZD } from './core.js';
 import ui from './ui.js';
 
-const noRequester = '(New user will be created)';
+const newRequester = '(New user will be created)';
+const noRequester = '(please create or search for the user)';
 
 const setRequesterName = (name) => {
-    ui.setText('newTicketRequester', name || noRequester);
+    ui.setText('newTicketRequester', name || newRequester);
+}
+
+const capitaliseFirst = (phrase) => phrase.charAt(0).toUpperCase() + phrase.slice(1);
+
+const extractNameFromEmail = (email) => {
+    // first part before @
+    let name = email.split('@')[0];
+    // remove trailing numbers
+    const i = name.indexOf(name.match(/\d+/));
+    if (i >= 0)
+        name = name.slice(0, i);
+    const s = name.match(/[\._-]+/);
+    if (s) {
+        const parts = name.split(s);
+        name = capitaliseFirst(parts[0]) + ' ' + capitaliseFirst(parts[1]);
+    }
+    return name;
 }
 
 const createUser = async () => {
     console.log(logStamp('Creating new user in Zendesk'));
     const appSettings = session.zafInfo.settings;
-    const name = appSettings.userName || `new user at ${session.phoneNo}`; 
+    const name = appSettings.userName || (appSettings.userEmail
+        ? extractNameFromEmail(appSettings.userEmail)
+        : `new user at ${session.phoneNo}`
+    );
     const data = await zafClient.request({
         url: '/api/v2/users.json',
         type: 'POST',
@@ -21,7 +42,8 @@ const createUser = async () => {
         data: JSON.stringify({
             user: {
                 name: name,
-                phone: session.phoneNo
+                phone: session.phoneNo,
+                ... (appSettings.userEmail && { email: appSettings.userEmail }),
             }
         })
     }).catch((err) => err);
@@ -35,10 +57,30 @@ const createUser = async () => {
     }
 }
 
+const handleNewUser = async (contact) => {
+    const appSettings = session.zafInfo.settings;
+    if (contact.mediaType !== "chat") {
+        await createUser();
+        return session.user;
+    }
+    else if (appSettings.userEmail || appSettings.userPhone || appSettings.userName) {
+        await createUser();
+        return session.user;
+    } else {
+        // New chat user cannot be created. This is due to contact flow not setting any of customer identifying attributes
+        // We will switch to agent (manual) assignment mode.
+        session.zafInfo.settings.createAssignTickets = 'agent';
+        const message = 'No customer data was passed through.\n Reverting to manual mode';
+        zafClient.invoke('notify', message, 'alert', { sticky: true });
+        return null;
+    }
+}
+
 export default {
 
     setRequesterName,
     createUser,
+    handleNewUser,
 
     refreshUser: async (type, id) => {
         console.log(logStamp(`refreshing user based on ${type}: ${id}`));
@@ -46,11 +88,11 @@ export default {
         if (type === 'other') return;
 
         // search in existing tab stash
+        ui.enable('newTicketCreateBtn');
         let requester = session.visitedTabs[type.substring(0, 1) + id];
         if (!requester) {
             // if not found, create a new entry
-            requester = { name: noRequester };
-            let requesterKey; 
+            let requesterKey;
             let userId = id;
             if (id) {
                 if (type === 'ticket') {
@@ -61,10 +103,14 @@ export default {
                 }
                 const user = await getFromZD(`users/${userId}.json`, 'user');
                 if (!user) return;
+                requester = { user, name: user.name };
                 requesterKey = requesterKey || `u${userId}`;
-                requester.user = user;
-                requester.name = user.name;
                 session.visitedTabs[requesterKey] = requester;
+            } else {
+                console.log(logStamp(`media type: ${session.contact.mediaType}`));
+                const isChat = session.contact.mediaType === "chat";
+                ui.enable('newTicketCreateBtn', !isChat);
+                requester = { name: isChat ? noRequester : newRequester };
             }
         }
         if (requester.user) {
@@ -73,7 +119,7 @@ export default {
             if (type === 'ticket') {
                 session.ticketId = id;
                 localStorage.setItem('vf.viewingTicketId', id);
-            } else 
+            } else
                 localStorage.removeItem('vf.viewingTicketId');
         }
 
@@ -89,14 +135,17 @@ export default {
             return null;
 
         const user = session.user;
+        const eventType = session.contact.mediaType === "chat"
+            ? 'incoming chat from'
+            : (session.outbound ? "outgoing call to" : 'incoming call from')
         const ticket = {
             via_id: session.outbound ? 46 : 45,
-            subject: `${session.outbound ? 'Outgoing call to' : 'Incoming call from'} ${user.name}`,
+            subject: `${capitaliseFirst(eventType)} ${user.name}`,
             requester_id: user.id || session.zenAgentId,
             submitter_id: session.zenAgentId,
             assignee_id: session.zenAgentId,
             comment: {
-                body: `Ticket created by an ${session.outbound ? 'outgoing call to' : 'incoming call from'} ${user.name}`,
+                body: `Ticket created by an ${eventType} ${user.name}`,
                 public: false
             }
         };
