@@ -238,13 +238,13 @@ export default (contact) => {
 
     try {
 
-        if (session.contact && session.contact.mediaType === 'chat') {
-            console.error(logStamp('agent is already handling another chat, aborting! '));
-            const message = `Multiple concurrent chats are not supported.
-            Please reject this chat and reconfigure your routing profile in Connect accordingly.`;
-            zafClient.invoke('notify', message, 'error', { sticky: true });
-            return;
-        }
+        // if (session.contact && session.contact.mediaType === 'chat') {
+        //     console.error(logStamp('agent is already handling another chat, aborting! '));
+        //     const message = `Multiple concurrent chats are not supported.
+        //     Please reject this chat and reconfigure your routing profile in Connect accordingly.`;
+        //     zafClient.invoke('notify', message, 'error', { sticky: true });
+        //     return;
+        // }
 
         const agentStatus = session.agent.getStatus().name;
         // abort if loaded into after call work
