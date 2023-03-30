@@ -6,7 +6,7 @@ import { containerId as callControlsContainerId, resizeId as callControlsResizeI
 import { dialableNumber } from './phoneNumbers.js'
 
 export const resize = (size) => {
-    let height = 510;
+    let height = 630;
     const expand = size === 'full' && !session.ticketAssigned;
 
     if (size !== callControlsResizeId) {
@@ -34,7 +34,7 @@ export const resize = (size) => {
     if (size === 'contactEnded') {
         ui.hide('newTicketcontainer')
         ui.hide(callControlsContainerId)
-        height = 510;
+        height = 630;
     }
 
     zafClient.invoke('resize', {
