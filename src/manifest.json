@@ -1,5 +1,5 @@
 {
-  "name": "Amazon Connect for Netvue V1",
+  "name": "Amazon Connect for Zendesk Test",
   "author": {
     "name": "Netvue Team",
     "email": "hi@netvue.com",
@@ -36,7 +36,7 @@
       "top_bar": {
         "url": "assets/topBar.html",
         "size": {
-          "width": "360px",
+          "width": "900px",
           "height": "510px"
         }
       },
@@ -99,6 +99,6 @@
       "default": false
     }
   ],
-  "version": "2.3.1.1 NV",
+  "version": "2.3.1.2-test",
   "frameworkVersion": "2.0"
 }

@@ -38,7 +38,7 @@ export const resize = (size) => {
     }
 
     zafClient.invoke('resize', {
-        width: '360px',
+        width: '900px',
         height: `${height}px`,
     });
 }

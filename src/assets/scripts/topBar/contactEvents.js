@@ -1,17 +1,16 @@
+import setAWSCredentials from '../util/credentials.js';
 import logStamp from '../util/log.js';
-import session from './session.js';
-import { zafClient } from './zafClient.js';
 import appConfig from './appConfig.js';
 import appendTicketComments from './appendTicketComments.js';
-import newTicket from './newTicket.js';
-import ui from './ui.js';
-import { resize, determineAssignmentBehavior, popTicket, getFromZD } from './core.js';
-import { processOutboundCall } from './outbound.js';
-import { processInboundCall } from './inbound.js';
-import setAWSCredentials from '../util/credentials.js';
 import { displayCallControls } from './callControls.js';
-import getChatTranscript from './getChatTranscript.js';
-import { convertChatMessage } from './getChatTranscript.js';
+import { determineAssignmentBehavior, getFromZD, popTicket, resize } from './core.js';
+import getChatTranscript, { convertChatMessage } from './getChatTranscript.js';
+import { processInboundCall } from './inbound.js';
+import newTicket from './newTicket.js';
+import { processOutboundCall } from './outbound.js';
+import session from './session.js';
+import ui from './ui.js';
+import { zafClient } from './zafClient.js';
 
 
 let appSettings = {};
@@ -141,14 +140,14 @@ const handleContactConnected = async () => {
                 }
                 resize('full');
             }
-            
+
             const autoAssignTickets = determineAssignmentBehavior();
             if (autoAssignTickets) {
                 if (!session.user)
                     // create new user if necessary
                     await newTicket.handleNewUser(session.contact);
-                    if (session.contact.mediaType === "chat" && !session.user) 
-                        return setupAgentMode(true);
+                if (session.contact.mediaType === "chat" && !session.user)
+                    return setupAgentMode(true);
                 if (!session.ticketId)
                     // create new ticket if necessary
                     session.ticketId = await newTicket.createTicket().catch((err) => null); //TODO: handle these errors
@@ -251,13 +250,13 @@ export default (contact) => {
         if (agentStatus.toLowerCase() === "aftercallwork") {
             console.warn(logStamp('agent is in After Call Work, aborting! '));
             return;
-        }    
+        }
 
         if (agentStatus.toLowerCase() === 'busy') {
             // call in progress
             console.warn(logStamp('call in progress!'));
             session.callInProgress = true;
-        }    
+        }
 
         session.contact = contact;
         const currentContact = session.contact;
@@ -290,7 +289,7 @@ export default (contact) => {
         }
 
         // is this call a transfer?
-        session.isTransfer = 
+        session.isTransfer =
             contactData.type !== "queue_callback" &&
             contactData.initialContactId &&
             contactData.initialContactId !== contactData.contactId;
