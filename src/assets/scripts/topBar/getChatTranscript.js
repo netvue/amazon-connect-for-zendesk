@@ -49,6 +49,12 @@ export const convertChatMessage = (payload) => {
         default:
             event = 'other/unknown';
     }
+
+    if (side == "customer") {
+        let soundPlayer = document.getElementById("messageIncomingSound"); 
+        soundPlayer.play(); 
+    }
+
     let name = DisplayName;
     let content = Content;
     if (DisplayName === "SYSTEM_MESSAGE") {
