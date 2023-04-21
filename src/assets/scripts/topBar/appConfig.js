@@ -92,7 +92,7 @@ const hardcoded = [
         description: "The Amazon Connect contact attribute that contains the user's email address. When supplied, email address will have priority in customer search over phone number and name.",
         type: "attribute",
         default: null,
-        attribute: "customer_email"
+        attribute: "email"
     },
     {
         name: "userPhone",
@@ -109,7 +109,7 @@ const hardcoded = [
         description: "The Amazon Connect contact attribute that contains the user's name which may be obtained from a different source, eg. sales database. This name would then be applied to the newly created Zendesk user instead of the CLI.",
         type: "attribute",
         default: null,
-        attribute: "customer_name"
+        attribute: "username"
     },
     {
         name: "customerLanguage",
